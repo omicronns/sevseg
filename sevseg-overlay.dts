@@ -1,0 +1,41 @@
+// Definitions for sevseg module
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2708";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			sevseg: sevseg {
+				compatible = "sevseg";
+				pinctrl-names = "default";
+				pinctrl-0 = <&sevseg_pins>;
+				status = "okay";
+
+				// Enable debugging messages
+				// (0 = off, 1 = on)
+				rpi,debug = <0>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&gpio>;
+		__overlay__ {
+			sevseg_pins: sevseg_pins {
+				brcm,pins = <23 24>;
+				brcm,function = <1 1>; // out=1 in=0
+				brcm,pull = <0 0>;     // off=0 down=1
+			};
+		};
+	};
+
+	__overrides__ {
+		gpio_seg_pins =  <&sevseg_pins>,"brcm,pins:0";
+		gpio_sel_pins =  <&sevseg_pins>,"brcm,pins:4";
+
+		debug =         <&sevseg>,"rpi,debug:0";
+	};
+};
