@@ -35,3 +35,9 @@
 # Custom
 *.sh
 *.dtbo
+*.cmd
+*.mod.c
+*~
+*.order
+Module.symvers
+.tmp*
