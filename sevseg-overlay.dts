@@ -3,39 +3,26 @@
 /plugin/;
 
 / {
-	compatible = "brcm,bcm2708";
-
+	compatible = "brcm,bcm2835";
 	fragment@0 {
 		target-path = "/";
 		__overlay__ {
-			sevseg: sevseg {
+			sevseg_device {
 				compatible = "sevseg";
-				pinctrl-names = "default";
-				pinctrl-0 = <&sevseg_pins>;
 				status = "okay";
+				select-gpios =	<&gpio 23 0>,
+								<&gpio 24 0>,
+								<&gpio 25 0>;
 
-				// Enable debugging messages
-				// (0 = off, 1 = on)
-				rpi,debug = <0>;
+				segment-gpios =	<&gpio 17 0>,
+								<&gpio 27 0>,
+								<&gpio 22 0>,
+								<&gpio 13 0>,
+								<&gpio 19 0>,
+								<&gpio 26 0>,
+								<&gpio 20 0>,
+								<&gpio 21 0>; 
 			};
 		};
-	};
-
-	fragment@1 {
-		target = <&gpio>;
-		__overlay__ {
-			sevseg_pins: sevseg_pins {
-				brcm,pins = <23 24>;
-				brcm,function = <1 1>; // out=1 in=0
-				brcm,pull = <0 0>;     // off=0 down=1
-			};
-		};
-	};
-
-	__overrides__ {
-		gpio_seg_pins =  <&sevseg_pins>,"brcm,pins:0";
-		gpio_sel_pins =  <&sevseg_pins>,"brcm,pins:4";
-
-		debug =         <&sevseg>,"rpi,debug:0";
 	};
 };
