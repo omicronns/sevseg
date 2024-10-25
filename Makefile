@@ -6,7 +6,6 @@ KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 
 default:
-	clear
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 	
 insm:

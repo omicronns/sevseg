@@ -1,110 +1,76 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio.h>
+#include <linux/string.h>
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/hrtimer.h>
 #include <linux/ktime.h>
 
-#define INVALID_NUMBER 0xFFFFFFFF
+#define SEVSEG_DRV_NAME		"sevseg"
 
-#define SEVSEG_DRV_NAME      "sevseg"
+#define BB_DELAY			1
+#define NUM_ELEMENTS		3
+#define REFRESH_PERIOD_DEF	5
 
-#define SEG_ON  0
-#define SEG_OFF 1
+#define MS_TO_NS(x)			(x * 1000000L)
 
-#define SEG_ARRAY_SIZE     8
-#define SEG_MAP_SIZE      11
-#define SELECT_ARRAY_SIZE  3
-#define SELECT_MAP_SIZE    6
-
-#define NUM_ELEMENTS_DEF   6
-#define REFRESH_PERIOD_DEF 3
-
-#define MS_TO_NS(x)        (x * 1000000L)
-
-static struct gpio_descs * select_pins_array;
-
-static unsigned char map_select_pins[SELECT_MAP_SIZE][SELECT_ARRAY_SIZE] = {
-	  {0, 0, 0}
-	, {1, 0, 0}
-	, {0, 1, 0}
-	, {1, 1, 0}
-	, {0, 0, 1}
-	, {1, 0, 1}
-};
-
-static struct gpio_descs * seg_pins_array;
-
-/*
-*  1_
-*6 | | 2
-* 7 -
-*5 |_| 3
-*   4
-*/
-
-static unsigned char map_num_to_seg_pins[SEG_MAP_SIZE][SEG_ARRAY_SIZE] = {
-{SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF, SEG_OFF}, /*0*/
-{SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF, SEG_OFF, SEG_OFF, SEG_OFF, SEG_OFF}, /*1*/
-{SEG_ON,  SEG_ON,  SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF, SEG_ON,  SEG_OFF}, /*2*/
-{SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF, SEG_OFF, SEG_ON,  SEG_OFF}, /*3*/
-{SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF, SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF}, /*4*/
-{SEG_ON,  SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF}, /*5*/
-{SEG_ON,  SEG_OFF, SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF}, /*6*/
-{SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF, SEG_OFF, SEG_OFF, SEG_OFF, SEG_OFF}, /*7*/
-{SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF}, /*8*/
-{SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF, SEG_ON,  SEG_ON,  SEG_OFF}, /*9*/
-{SEG_ON,  SEG_OFF, SEG_OFF, SEG_ON,  SEG_ON,  SEG_ON,  SEG_ON,  SEG_OFF}  /*E*/
-};
+static struct gpio_descs* select_pins_array;
+static struct gpio_desc* buffer_clk;
+static struct gpio_desc* buffer_mosi;
 
 static struct hrtimer refresh_timer;
 static ktime_t refresh_period;
-static long nb_of_elements = NUM_ELEMENTS_DEF;
-static long sevseg_number = 123456;
 static unsigned char active_element; /* set to 0 by default */
+static uint8_t fbuf[NUM_ELEMENTS] = {0xff, 0xff, 0xff};
 
-static void set_sevseg_digit(unsigned char digit)
+static void set_clk(int val)
 {
-	int idx;
-
-	for (idx = 0; idx <  SEG_ARRAY_SIZE; idx++)
-	{
-		gpiod_set_value(seg_pins_array->desc[idx], map_num_to_seg_pins[digit][idx]);
-	}
+	gpiod_set_value(buffer_clk, val);
 }
 
-static void activate_element(unsigned char active_element)
+static void set_mosi(int val)
+{
+	gpiod_set_value(buffer_mosi, val);
+}
+
+static void element_send_data(uint8_t val)
 {
 	int idx;
 
-	for (idx = 0; idx < SELECT_ARRAY_SIZE; idx++)
+	for(idx = 7; idx >= 0; idx -= 1)
 	{
-		gpiod_set_value(select_pins_array->desc[idx], map_select_pins[active_element][idx]);
+		set_mosi((val >> idx) & 1);
+		udelay(BB_DELAY);
+		set_clk(0);
+		udelay(BB_DELAY);
+		set_clk(1);
 	}
+
+	udelay(BB_DELAY);
+	set_mosi(1);
+}
+
+static void element_on(int idx)
+{
+	gpiod_set_value(select_pins_array->desc[idx], 0);
+}
+
+static void element_off(int idx)
+{
+	gpiod_set_value(select_pins_array->desc[(idx + NUM_ELEMENTS - 1) % NUM_ELEMENTS], 1);
 }
 
 enum hrtimer_restart refresh_timer_handler(struct hrtimer *timer)
 {
 	ktime_t timer_time;
-	unsigned char idx;
-	long active_digit;
-
-	if (sevseg_number != INVALID_NUMBER)  {
-		active_digit = sevseg_number;
-		for (idx = 0; idx < nb_of_elements - active_element - 1; idx++)
-			active_digit = active_digit / 10;
-		active_digit = active_digit % 10;
-	} else
-		active_digit = SEG_MAP_SIZE - 1;
-
-	activate_element(active_element);
-	set_sevseg_digit(active_digit);
-	if (active_element > 0)
-		active_element--;
-	else
-		active_element = nb_of_elements - 1;
+	
+	element_off(active_element);
+	element_send_data(fbuf[active_element]);
+	element_on(active_element);
+	active_element = (active_element + 1) % NUM_ELEMENTS;
 
 	timer_time = hrtimer_cb_get_time(&refresh_timer);
 	hrtimer_forward(&refresh_timer, timer_time, refresh_period);
@@ -112,24 +78,17 @@ enum hrtimer_restart refresh_timer_handler(struct hrtimer *timer)
 	return HRTIMER_RESTART;
 }
 
-static ssize_t set_number_callback(struct device *dev,
+static ssize_t set_data_callback(struct device *dev,
 				   struct device_attribute *attr,
 				   const char *buf,
 				   size_t count)
 {
-	long max_number = 1;
-	unsigned char idx;
+	if(count != NUM_ELEMENTS)
+		printk("set_data_callback: Error! The data is %d bytes long, should be %d", count, NUM_ELEMENTS);
+	else
+		memcpy(fbuf, buf, 3);
 
-	if (kstrtol(buf, 10, &sevseg_number) < 0)
-		return -EINVAL;
-
-	for (idx = 0; idx < nb_of_elements; idx++)
-		max_number = max_number * 10;
-
-	if (sevseg_number > max_number)
-		sevseg_number = INVALID_NUMBER;
-
-	printk("set_number_callback: The sevseg number is %ld", sevseg_number);
+	printk("set_data_callback: The data is set");
 
 	return count;
 }
@@ -153,27 +112,6 @@ static ssize_t set_period_callback(struct device *dev,
 	timer_time = hrtimer_cb_get_time(&refresh_timer);
 	hrtimer_forward(&refresh_timer, timer_time, refresh_period);
 	printk("set_period_callback: The timer period is %ld", period);
-
-	return count;
-}
-
-static ssize_t set_elements_callback(struct device *dev,
-				     struct device_attribute *attr,
-				     const char *buf,
-				     size_t count)
-{
-	long elements;
-
-	if (kstrtol(buf, 10, &elements) < 0)
-		return -EINVAL;
-
-	if ((elements > 0) && (elements <= SELECT_MAP_SIZE))
-		nb_of_elements = elements;
-	else
-		nb_of_elements = NUM_ELEMENTS_DEF;
-
-	active_element = nb_of_elements - 1;
-	printk("set_elements_callback: Number of elements %ld", nb_of_elements);
 
 	return count;
 }
@@ -203,13 +141,11 @@ static struct platform_driver sevseg_driver = {
 };
 
 static DEVICE_ATTR(period, 0660, NULL, set_period_callback);
-static DEVICE_ATTR(elements, 0660, NULL, set_elements_callback);
-static DEVICE_ATTR(number, 0660, NULL, set_number_callback);
+static DEVICE_ATTR(data, 0660, NULL, set_data_callback);
 
 static struct attribute *sevseg_attr[] = {
 		&dev_attr_period.attr,
-		&dev_attr_elements.attr,
-		&dev_attr_number.attr,
+		&dev_attr_data.attr,
 		NULL
 	};
 
@@ -225,22 +161,6 @@ static int sevseg_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 
 	printk("sevseg_probe: BEGIN\n");
-	
-	if(!device_property_present(dev, "segment-gpios")) {
-		printk("sevseg_probe - Error! Device property 'segment-gpios' not found!\n");
-		return -1;
-	}
-
-	if(!device_property_present(dev, "select-gpios")) {
-		printk("sevseg_probe - Error! Device property 'select-gpios' not found!\n");
-		return -1;
-	}
-
-	seg_pins_array = gpiod_get_array(dev, "segment", GPIOD_OUT_HIGH);
-	if(IS_ERR(seg_pins_array)) {
-		printk("sevseg_probe - Error! Could not setup the GPIO\n");
-		return -1 * IS_ERR(seg_pins_array);
-	}
 
 	select_pins_array = gpiod_get_array(dev, "select", GPIOD_OUT_HIGH);
 	if(IS_ERR(select_pins_array)) {
@@ -248,21 +168,33 @@ static int sevseg_probe(struct platform_device *pdev)
 		return -1 * IS_ERR(select_pins_array);
 	}
 
-	s_pDeviceClass = class_create(THIS_MODULE, SEVSEG_DRV_NAME);
+	buffer_clk = gpiod_get(dev, "buffer-clk", GPIOD_OUT_HIGH);
+	if(IS_ERR(buffer_clk)) {
+		printk("sevseg_probe - Error! Could not setup the GPIO\n");
+		return -1 * IS_ERR(buffer_clk);
+	}
+
+	buffer_mosi = gpiod_get(dev, "buffer-mosi", GPIOD_OUT_HIGH);
+	if(IS_ERR(buffer_mosi)) {
+		printk("sevseg_probe - Error! Could not setup the GPIO\n");
+		return -1 * IS_ERR(buffer_mosi);
+	}
+
+	s_pDeviceClass = class_create(SEVSEG_DRV_NAME);
 	if (s_pDeviceClass == NULL) {
-		printk("sevseg_probe: cannot create class");
-		return -1;;
+		printk("sevseg_probe: Error! cannot create class");
+		return -1;
 	}
 
 	s_pDevObject = device_create(s_pDeviceClass, NULL, 0, NULL,
 					SEVSEG_DRV_NAME);
 	if (s_pDevObject == NULL) {
-		printk("sevseg_probe: cannot create device");
+		printk("sevseg_probe: Error! cannot create device");
 		goto err_class_create;
 	}
 
 	if (sysfs_create_group(&s_pDevObject->kobj, &sevseg_attr_group)) {
-		printk("sevseg_probe: cannot create sysfs files");
+		printk("sevseg_probe: Error! cannot create sysfs files");
 		goto err_device_create;
 	}
 
@@ -289,8 +221,9 @@ err_class_create:
 static int sevseg_remove(struct platform_device *pdev) {
 	printk("sevseg_remove: BEGIN\n");
 
-	gpiod_put_array(seg_pins_array);
 	gpiod_put_array(select_pins_array);
+	gpiod_put(buffer_clk);
+	gpiod_put(buffer_mosi);
 
 	hrtimer_cancel(&refresh_timer);
 	sysfs_remove_group(&s_pDevObject->kobj, &sevseg_attr_group);
@@ -307,8 +240,6 @@ int sevseg_init(void)
 	int result;
 
 	printk("sevseg_init: driver initialization...");
-
-	active_element = nb_of_elements - 1;
 
 	result = platform_driver_register(&sevseg_driver);
 	if (result) {
@@ -329,4 +260,3 @@ void sevseg_cleanup(void)
 MODULE_LICENSE("GPL");
 module_init(sevseg_init);
 module_exit(sevseg_cleanup);
-
