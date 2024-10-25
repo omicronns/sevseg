@@ -7,15 +7,17 @@ make dts
 make
 sudo dtoverlay sevseg.dtbo
 sudo insmod sevseg.ko
+
+# set data to display (data is not chars, but raw segments to turn on)
+echo -n 'xxx' | sudo tee /sys/class/sevseg/sevseg/data
+
+# set refresh rate to 10ms
+echo -n '10' | sudo tee /sys/class/sevseg/sevseg/period
 ```
 
-Video:
-https://www.youtube.com/watch?v=G8_zVYXSshE
+# Modifications vs original
 
-<img src="./docs/img/IMG20240208193704.png" />
+Original repo: https://github.com/martinowar/sevseg
 
-<img src="./docs/img/IMG20240208193714.png" />
-
-<img src="./docs/img/IMG20240208193723.png" />
-
-<img src="./docs/img/IMG20240208200521.png" />
+This fork, drives an external 74HC164 shift register, that connects with the display.
+Also element selection is directly driven by RPI gpios.

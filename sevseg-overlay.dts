@@ -10,18 +10,12 @@
 			sevseg_device {
 				compatible = "sevseg";
 				status = "okay";
-				select-gpios =	<&gpio 23 0>,
-								<&gpio 24 0>,
-								<&gpio 25 0>;
-
-				segment-gpios =	<&gpio 17 0>,
-								<&gpio 27 0>,
-								<&gpio 22 0>,
-								<&gpio 13 0>,
-								<&gpio 19 0>,
-								<&gpio 26 0>,
+				select-gpios =	<&gpio 21 0>,
 								<&gpio 20 0>,
-								<&gpio 21 0>; 
+								<&gpio 16 0>;
+
+				buffer-clk-gpios =	<&gpio 6 0>;
+				buffer-mosi-gpios =	<&gpio 13 0>;
 			};
 		};
 	};

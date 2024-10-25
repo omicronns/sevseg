@@ -6,14 +6,19 @@ KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 
 default:
-	clear
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
-	
-insm:
-	insmod sevseg.ko
 
-rmm:
-	rmmod sevseg
+install:
+	xz -zkf sevseg.ko
+	cp sevseg.ko.xz /lib/modules/$(shell uname -r)/kernel/drivers/auxdisplay/
+	cp sevseg.dtbo /boot/firmware/overlays/
+	dtoverlay sevseg.dtbo
+	depmod
+
+uninstall:
+	rm /lib/modules/$(shell uname -r)/kernel/drivers/auxdisplay/sevseg.ko.xz
+	rm /boot/firmware/overlays/sevseg.dtbo
+	depmod
 
 dts:
 	dtc -I dts -O dtb -o sevseg.dtbo sevseg-overlay.dts
@@ -25,4 +30,5 @@ check:
 	clear
 	$(KERNELDIR)/scripts/checkpatch.pl -f sevseg.c
 
+all: default dts
 endif
